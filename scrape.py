@@ -55,12 +55,18 @@ def get_trip(driver, reservation_url_snippet):
 def valid_trip(el):
     return 'completed' in el.get_attribute('class')
 
-def get_trips(driver, page = None):
-    if page is None:
+def get_trips(driver, page_slug = None):
+    if page_slug is None:
         driver.get('https://turo.com/trips')
     else:
-        # TODO: Get other pages
-        driver.get('https://turo.com/trips')
+        print 'Getting https://turo.com/trips?' + page_slug
+        driver.get('https://turo.com/trips?' + page_slug)
+
+    # Get this now and use this later so we don't have to go back
+    next_page = None
+    last_page = driver.find_elements_by_class_name('paginator-link')[-1]
+    if ord(last_page.text) == 8250:
+        next_page = last_page.get_attribute('href').split('?')[-1]
 
     trip_elements = [te.find_element_by_class_name('reservation') for te in driver.find_elements_by_class_name('reservationSummary') if valid_trip(te)]
 
@@ -68,8 +74,11 @@ def get_trips(driver, page = None):
 
     trip_details = [get_trip(driver, trip_slug) for trip_slug in trip_slugs]
 
+    print trip_details
+
     # Get the last page link and see if there's more
-    8250
+    if next_page is not None:
+        get_trips(driver, next_page)
 
 def init_driver():
     driver = webdriver.Chrome()
@@ -85,7 +94,7 @@ def get_ride_info(outfile):
 
     get_trips(driver)
 
-    # driver.close()
+    driver.close()
 
 if __name__ == '__main__':
     outfile = 'stats.csv'
