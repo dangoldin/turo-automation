@@ -1,7 +1,7 @@
 from selenium import webdriver
 from selenium.webdriver.common.keys import Keys
 
-import time, re, csv, sys
+import datetime, time, re, csv, sys
 
 import config
 
@@ -11,11 +11,6 @@ SLEEP_SECONDS = 3
 
 def login(driver):
     driver.get('https://turo.com/login')
-
-    # login_button = driver.find_element_by_xpath('//*[@id="pageContainer"]/header/div/ul/li[4]/a')
-    # login_button.click()
-
-    # time.sleep(1)
 
     username = driver.find_element_by_id('username')
     username.send_keys(config.TURO_USERNAME)
@@ -33,24 +28,32 @@ def write_stats(stats, out):
         for row in stats:
             w.writerow(row)
 
+def get_datetime(el):
+    date = el.find_element_by_class_name('scheduleDate').text
+    time = el.find_element_by_class_name('scheduleTime').text
+
+    return (date, time)
+
 def get_trip(driver, reservation_url_snippet):
     driver.get('https://turo.com' + reservation_url_snippet)
 
     pickup = driver.find_element_by_class_name('reservationSummary-schedulePickUp')
-    pickup_date = pickup.find_element_by_class_name('scheduleDate').text
-    pickup_time = pickup.find_element_by_class_name('scheduleTime').text
-
     dropoff = driver.find_element_by_class_name('reservationSummaryDropOff')
-    dropoff_date = dropoff.find_element_by_class_name('scheduleDate').text
-    dropoff_time = dropoff.find_element_by_class_name('scheduleTime').text
 
-    cost = float(driver.find_element_by_class_name('reservationSummary-cost').find_element_by_class_name('amount').text.replace('$', '').strip())
+    try:
+        cost = float(driver.find_element_by_class_name('reservationSummary-cost').find_element_by_class_name('amount').text.replace('$', '').strip())
+    except Exception, e:
+        print 'Failed to get cost', e
 
     return {
-        'pickup': (pickup_date, pickup_time),
-        'dropoff': (dropoff_date, dropoff_time),
+        'pickup': get_datetime(pickup),
+        'dropoff': get_datetime(dropoff),
         'cost': cost,
     }
+
+# Only trips that have a receipt and have already happened
+def valid_trip(el):
+    return 'completed' in el.get_attribute('class')
 
 def get_trips(driver, page = None):
     if page is None:
@@ -59,16 +62,22 @@ def get_trips(driver, page = None):
         # TODO: Get other pages
         driver.get('https://turo.com/trips')
 
-    trip_elements = driver.find_elements_by_class_name('reservation')
+    trip_elements = [te.find_element_by_class_name('reservation') for te in driver.find_elements_by_class_name('reservationSummary') if valid_trip(te)]
 
-    trips = [te.get_attribute('data-href') for te in trip_elements]
+    trip_slugs = [te.get_attribute('data-href') for te in trip_elements]
 
-    # TODO: Get other pages
+    trip_details = [get_trip(driver, trip_slug) for trip_slug in trip_slugs]
 
+    # Get the last page link and see if there's more
+    8250
 
-def get_ride_info(outfile):
+def init_driver():
     driver = webdriver.Chrome()
     driver.set_page_load_timeout(30)
+    return driver
+
+def get_ride_info(outfile):
+    driver = init_driver()
 
     login(driver)
 
@@ -76,7 +85,7 @@ def get_ride_info(outfile):
 
     get_trips(driver)
 
-    driver.close()
+    # driver.close()
 
 if __name__ == '__main__':
     outfile = 'stats.csv'
