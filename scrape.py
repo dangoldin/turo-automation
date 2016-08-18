@@ -20,35 +20,51 @@ def login(driver):
 
     driver.find_element_by_id("submit").click()
 
-def write_stats(stats, out):
+def write_to_file(rows, out):
     print 'Writing to file', out
     with open(out, 'w') as f:
-        w = csv.DictWriter(f, delimiter=',', fieldnames=fields)
+        w = csv.DictWriter(f, delimiter=',', fieldnames=rows[0].keys())
         w.writeheader()
-        for row in stats:
+        for row in rows:
             w.writerow(row)
 
 def get_datetime(el):
     date = el.find_element_by_class_name('scheduleDate').text
     time = el.find_element_by_class_name('scheduleTime').text
 
-    return (date, time)
+    date_str = datetime.datetime.now().strftime('%Y') + ' ' + date + ' ' + time
+
+    return datetime.datetime.strptime(date_str, '%Y %b %d %I:%M %p')
 
 def get_trip(driver, reservation_url_snippet):
-    driver.get('https://turo.com' + reservation_url_snippet)
+    driver.get('https://turo.com' + reservation_url_snippet + '/receipt/')
 
     pickup = driver.find_element_by_class_name('reservationSummary-schedulePickUp')
     dropoff = driver.find_element_by_class_name('reservationSummaryDropOff')
 
+    cost = float(driver.find_element_by_class_name('cost-details').find_element_by_class_name('value').text.replace('$', '').strip())
+    earnings = float(driver.find_element_by_class_name('payment-details').find_element_by_class_name('total').text.replace('$', '').strip())
+    reimbursement_tolls = 0.0
+    reimbursement_mileage = 0.0
+
     try:
-        cost = float(driver.find_element_by_class_name('reservationSummary-cost').find_element_by_class_name('amount').text.replace('$', '').strip())
+        reimbursements = driver.find_element_by_class_name('reimbursements').find_elements_by_class_name('line-item--longLabel')
+        for r in reimbursements:
+            if 'tolls' in r.text.lower():
+                reimbursement_tolls = float(r.text.lower().split(' ')[-1])
+            if 'additional miles driven' in r.text.lower():
+                reimbursement_mileage = float(r.text.lower().split(' ')[-1])
     except Exception, e:
-        print 'Failed to get cost', e
+        print 'No reimbursements found'
 
     return {
+        'url_snippet': reservation_url_snippet,
         'pickup': get_datetime(pickup),
         'dropoff': get_datetime(dropoff),
         'cost': cost,
+        'earnings': earnings,
+        'reimbursement_tolls': reimbursement_tolls,
+        'reimbursement_mileage': reimbursement_mileage,
     }
 
 # Only trips that have a receipt and have already happened
@@ -78,7 +94,9 @@ def get_trips(driver, page_slug = None):
 
     # Get the last page link and see if there's more
     if next_page is not None:
-        get_trips(driver, next_page)
+        trip_details += get_trips(driver, next_page)
+
+    return trip_details
 
 def init_driver():
     driver = webdriver.Chrome()
@@ -92,7 +110,9 @@ def get_ride_info(outfile):
 
     time.sleep(SLEEP_SECONDS)
 
-    get_trips(driver)
+    trips = get_trips(driver)
+
+    write_to_file(trips, 'out.csv')
 
     driver.close()
 
