@@ -51,6 +51,8 @@ class TuroCrawler:
         return datetime.datetime.strptime(date_str, '%Y %b %d %I:%M %p')
 
     def get_trip(self, reservation_url_snippet):
+        print 'Getting trip', reservation_url_snippet
+
         self.driver.get('https://turo.com' + reservation_url_snippet + '/receipt/')
 
         pickup = self.driver.find_element_by_class_name('reservationSummary-schedulePickUp')
@@ -83,7 +85,27 @@ class TuroCrawler:
 
     # Only trips that have a receipt and have already happened
     def is_valid_trip(self, el):
-        return 'completed' in el.get_attribute('class')
+        return 'completed' in el.get_attribute('class') or 'cancelled' in el.get_attribute('class')
+
+    def process_cancelled_trip(self, cancelled_trip):
+        print 'Processing ', cancelled_trip.text
+
+        if 'You cancelled this trip' in cancelled_trip.text:
+            earnings = 0.0
+        elif '$' in cancelled_trip.text:
+            earnings = float(re.findall('\$\d+\.\d+', cancelled_trip.text)[0].replace('$',''))
+        else:
+            earnings = 0.0
+
+        return {
+            'url_snippet': '',
+            'pickup': '',
+            'dropoff': '',
+            'cost': 0.0,
+            'earnings': earnings,
+            'reimbursement_tolls': 0.0,
+            'reimbursement_mileage': 0.0,
+        }
 
     def get_trips(self, page_slug = None):
         if page_slug is None:
@@ -98,11 +120,16 @@ class TuroCrawler:
         if ord(last_page.text) == 8250:
             next_page = last_page.get_attribute('href').split('?')[-1]
 
-        trip_elements = [te.find_element_by_class_name('reservation') for te in self.driver.find_elements_by_class_name('reservationSummary') if self.is_valid_trip(te)]
+        trip_elements = [te for te in self.driver.find_elements_by_class_name('reservationSummary') if self.is_valid_trip(te)]
 
-        trip_slugs = [te.get_attribute('data-href') for te in trip_elements]
+        cancelled_trips = [te for te in trip_elements if 'cancelled' in te.get_attribute('class')]
 
-        trip_details = [self.get_trip(trip_slug) for trip_slug in trip_slugs]
+        trip_slugs = [te.find_element_by_class_name('reservation').get_attribute('data-href') for te in trip_elements if 'completed' in te.get_attribute('class')]
+
+        print 'Trip Slugs', trip_slugs
+        print 'Cancelled Trips', [ct.text for ct in cancelled_trips]
+
+        trip_details = [self.process_cancelled_trip(ct) for ct in cancelled_trips] + [self.get_trip(trip_slug) for trip_slug in trip_slugs]
 
         print trip_details
 
