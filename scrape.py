@@ -19,6 +19,7 @@ class TuroCrawler:
         time.sleep(SLEEP_SECONDS)
         trips = self.get_trips()
         self.write_to_file(trips, outfile)
+        self.stop()
 
     def login(self):
         self.driver.get('https://turo.com/login')
@@ -34,12 +35,13 @@ class TuroCrawler:
     def write_to_file(self, rows, out):
         print 'Writing to file', out
         with open(out, 'w') as f:
-            w = csv.DictWriter(f, delimiter=',', fieldnames=rows[0].keys())
+            w = csv.DictWriter(f, delimiter=',',
+                fieldnames=['url_snippet', 'pickup', 'dropoff', 'cost', 'reimbursement_mileage', 'reimbursement_tolls', 'earnings']
+                )
             w.writeheader()
-            for row in rows:
-                w.writerow(row)
+            w.writerows(rows)
 
-    def stop():
+    def stop(self):
         self.driver.close()
 
     def get_datetime(self, el):
