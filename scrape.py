@@ -35,36 +35,46 @@ class TuroCrawler:
     def write_to_file(self, rows, out):
         print 'Writing to file', out
         with open(out, 'w') as f:
-            w = csv.DictWriter(f, delimiter=',',
-                fieldnames=['url_snippet', 'pickup', 'dropoff', 'cost', 'reimbursement_mileage', 'reimbursement_tolls', 'earnings']
-                )
+            w = csv.DictWriter(f,
+                    fieldnames = rows[0].keys(),
+                    delimiter=',')
             w.writeheader()
             w.writerows(rows)
 
     def stop(self):
         self.driver.close()
 
-    def get_datetime(self, el):
-        date = el.find_element_by_class_name('scheduleDate').text
-        time = el.find_element_by_class_name('scheduleTime').text
+    def get_datetime(self, raw_string):
+        # Remove the header text
+        cleaned_str = re.sub('.*\n', '', 
+                raw_string, count = 1)
 
-        date_str = datetime.datetime.now().strftime('%Y') + ' ' + date + ' ' + time
+        return datetime.datetime.strptime(cleaned_str, '%a, %b %d, %Y\n%I:%M %p')
 
-        return datetime.datetime.strptime(date_str, '%Y %b %d %I:%M %p')
+    def get_trip(self, reservation_url):
+        print 'Getting trip', reservation_url
 
-    def get_trip(self, reservation_url_snippet):
-        print 'Getting trip', reservation_url_snippet
+        self.driver.get(reservation_url + '/receipt/')
 
-        self.driver.get('https://turo.com' + reservation_url_snippet + '/receipt/')
+        pickup, dropoff = [self.get_datetime(x.text) for x in self.driver.find_elements_by_class_name('receiptSchedule')]
 
-        pickup = self.driver.find_element_by_class_name('reservationSummary-schedulePickUp')
-        dropoff = self.driver.find_element_by_class_name('reservationSummaryDropOff')
+        line_items = self.driver.find_elements_by_class_name('line-item')
 
-        cost = float(self.driver.find_element_by_class_name('cost-details').find_element_by_class_name('value').text.replace('$', '').strip())
-        earnings = float(self.driver.find_element_by_class_name('payment-details').find_element_by_class_name('total').text.replace('$', '').strip())
-        reimbursement_tolls = 0.0
-        reimbursement_mileage = 0.0
+        results = {'URL': reservation_url,
+                'PICKUP': pickup,
+                'DROPOFF': dropoff}
+        for item in line_items:
+            name = item.find_element_by_class_name('label').text
+            if name == 'YOU PAID': # Ignore trips where I didn't host
+                continue
+            value = item.find_element_by_class_name('value').text
+            if name != 'GUEST':
+                value = float(re.search('[\d|\.]+', value).group())
+            results[name] = value
 
+
+# This code is almost certainly wrong, but I don't have 
+# any examples with reimbursements to test.
         try:
             reimbursements = self.driver.find_element_by_class_name('reimbursements').find_elements_by_class_name('line-item--longLabel')
             for r in reimbursements:
@@ -73,17 +83,9 @@ class TuroCrawler:
                 if 'additional miles driven' in r.text.lower():
                     reimbursement_mileage = float(r.text.lower().split(' ')[-1])
         except Exception, e:
-            print 'No reimbursements found for', reservation_url_snippet
+            print 'No reimbursements found for', reservation_url
 
-        return {
-            'url_snippet': reservation_url_snippet,
-            'pickup': self.get_datetime(pickup),
-            'dropoff': self.get_datetime(dropoff),
-            'cost': cost,
-            'earnings': earnings,
-            'reimbursement_tolls': reimbursement_tolls,
-            'reimbursement_mileage': reimbursement_mileage,
-        }
+        return results
 
     # Only trips that have a receipt and have already happened
     def is_valid_trip(self, el):
@@ -111,27 +113,30 @@ class TuroCrawler:
 
     def get_trips(self, page_slug = None):
         if page_slug is None:
-            self.driver.get('https://turo.com/trips')
+            self.driver.get('https://turo.com/dashboard/history')
         else:
-            print 'Getting https://turo.com/trips?' + page_slug
-            self.driver.get('https://turo.com/trips?' + page_slug)
+            print 'Getting https://turo.com/dashboard/history?' + page_slug
+            self.driver.get('https://turo.com/dashboard/history?' + page_slug)
+
+        # Wait for the page to load
+        time.sleep(SLEEP_SECONDS)
 
         # Get this now and use this later so we don't have to go back
         next_page = None
-        last_page = self.driver.find_elements_by_class_name('paginator-link')[-1]
-        if ord(last_page.text) == 8250:
-            next_page = last_page.get_attribute('href').split('?')[-1]
+        try:
+            last_page = self.driver.find_elements_by_class_name('paginator-link')[-1]
+            if ord(last_page.text) == 8250:
+                next_page = last_page.get_attribute('href').split('?')[-1]
+        except IndexError:
+            print "Only one page"
 
-        trip_elements = [te for te in self.driver.find_elements_by_class_name('reservationSummary') if self.is_valid_trip(te)]
+        trip_elements = self.driver.find_elements_by_class_name('dashboardActivityFeed-link')
 
-        cancelled_trips = [te for te in trip_elements if 'cancelled' in te.get_attribute('class')]
-
-        trip_slugs = [te.find_element_by_class_name('reservation').get_attribute('data-href') for te in trip_elements if 'completed' in te.get_attribute('class')]
+        trip_slugs = [te.get_attribute('href') for te in trip_elements]
 
         print 'Trip Slugs', trip_slugs
-        print 'Cancelled Trips', [ct.text for ct in cancelled_trips]
 
-        trip_details = [self.process_cancelled_trip(ct) for ct in cancelled_trips] + [self.get_trip(trip_slug) for trip_slug in trip_slugs]
+        trip_details = [self.get_trip(trip_slug) for trip_slug in trip_slugs]
 
         print trip_details
 
