@@ -34,6 +34,7 @@ class TuroCrawler:
 
     def write_to_file(self, rows, out):
         print 'Writing to file', out
+        rows = [x for x in rows if x != None]
         with open(out, 'w') as f:
             w = csv.DictWriter(f,
                     fieldnames = rows[0].keys(),
@@ -66,7 +67,7 @@ class TuroCrawler:
         for item in line_items:
             name = item.find_element_by_class_name('label').text
             if name == 'YOU PAID': # Ignore trips where I didn't host
-                continue
+                return None
             value = item.find_element_by_class_name('value').text
             if name != 'GUEST':
                 value = float(re.search('[\d|\.]+', value).group())
